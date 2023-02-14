@@ -1,0 +1,334 @@
+---
+title: "analisis1"
+format: html
+editor: visual
+---
+
+Cargamos el dataframe: 
+
+```{r}
+data<- read.csv('datos/data1.csv', stringsAsFactors = T)
+head(data)
+```
+
+
+
+
+Ahora veo el tipo de datos: 
+
+```{r}
+summary(data)
+```
+
+
+Primero voy a hacer una regresión lineal entre el precio y la tasa de limpieza: 
+
+```{r}
+
+library(GGally)
+ggpairs(data[,c("price", "cleaning_fee", "zipcode", "security_deposit", "availability_365", "number_of_reviews", "bed_type", "room_type")],
+lower = list(continuous = wrap("points", alpha = 0.3,size=0.3,color='blue'))
+) 
+```
+
+
+
+```{r}
+model_prueba <- lm(data=data, formula=price~cleaning_fee)
+summary(model_prueba)
+```
+
+
+```{r}
+library(GGally)
+ggpairs(data[,c("price", "cleaning_fee")],
+lower = list(continuous = wrap("points", alpha = 0.3,size=0.3,color='blue'))
+) 
+
+```
+
+
+```{r}
+today <- format(Sys.time(), "%Y-%m-%d")
+today
+library(tidyverse)
+library(ggplot2)
+ggplot(data, aes(x=host_since,y=price))+geom_line()+ 
+  xlab('host since')
+```
+
+
+Vamos a hacer el análisis entre el precio del alquiler y el precio de la tarifa de limpieza, la tarifa de limpieza es el parámetro con mayor correlación:
+
+Primero voy a pintar el histograma de cada uno: 
+```{r}
+g1 <- ggplot(data, aes(x=price))+
+  geom_histogram(bins=20, color='blue', fill='dark blue')+
+  geom_boxplot(width=5, color='red')+ggtitle("Precio de alquiler")+
+  xlim(c(140,200))
+ 
+g2 <- ggplot(data, aes(x=cleaning_fee))+
+  geom_histogram(bins=20, color='blue', fill='dark blue')+
+  geom_boxplot(width=0.6, color='red')+ggtitle("tasa limpieza")+
+  xlim(c(140,200))
+
+gridExtra::grid.arrange(g1, g2, ncol=2)  
+```
+
+Vamos a ver como se relaciona el precio del alquiler y la tasa de limpieza haciendo una regresión lineal: 
+
+```{r}
+ggplot(data, aes(x=price, y=cleaning_fee))+geom_point(color='blue')+
+  geom_smooth(method='lm', formula = y~x, color='red')+
+  xlab('Precio')+ylab('Tasa limpieza')+
+  ggtitle("Relación entre precio de alquiler y la tasa de limpieza")
+```
+
+
+
+
+Voy a filtrar para quedarme con los precios inferiores 250 y ver en más grande donde se acumulan más datos 
+
+
+
+```{r}
+data_prueba<- data |> filter(price<200) |> filter(cleaning_fee<100)
+ggplot(data_prueba, aes(x=price, y=cleaning_fee))+geom_point(color='blue')+
+  geom_smooth(method='lm', formula = y~x, color='red')+
+  xlab('Precio')+ylab('Tasa limpieza')+
+  ggtitle("Relación entre precio de alquiler y la tasa de limpieza")
+```
+
+
+
+
+Esto sería una correlación positiva, a mayor precio, mayor tasa de limpieza
+
+
+
+El R cuadrático medio nos va a decir que bueno es mi modelo de Regresión lineal. 
+
+
+```{r}
+model <- lm(data=data, formula=price~cleaning_fee+ I(log10(number_of_reviews+0.1))+I(log10(zipcode+0.1)))
+summary(model)
+```
+
+
+Vamos a ver que tal predice: 
+
+```{r}
+df_test <- data.frame(cleaning_fee=c(150,50,100,30,120,60))
+df_test$price<-predict(model, df_test)
+df_test
+```
+
+
+Voy a ver otro modelo relacionando varios parámetros no solo 1: 
+
+```{r}
+model3<- lm(data=data, formula=price~cleaning_fee+zipcode+ security_deposit+availability_365+number_of_reviews)
+summary(model3)
+```
+
+```{r}
+confint(model3)
+```
+
+```{r}
+predict(model3, data.frame(cleaning_fee=26,zipcode=28012, security_deposit=100,availability_365= 300, number_of_reviews=40 ))
+```
+
+Voy a dividir el dataframe en train y test: 
+
+```{r}
+set.seed(1234)
+idx <- sample(1:nrow(data), nrow(data)*0.7)
+data.train <-data[idx,]
+data.test <-data[-idx,]
+```
+
+```{r}
+print("Training:")
+summary(data.train)
+paste("Numero de filas training",nrow(data.train))
+print("Testing:")
+summary(data.test)
+paste("Numero de filas testing",nrow(data.test))
+```
+
+Las dos siguientes son las figuras de calidad tanto de test como de training, ver que las dos tienen un R cuadrático medio parecido 
+
+```{r}
+data.train$price_est <- predict(model3, data.train)
+caret::postResample(pred = data.train$price_est, obs=data.train$price)
+```
+
+```{r}
+data.test$price_est <- predict(model3, data.test)
+caret::postResample(pred = data.test$price_est, obs=data.test$price)
+```
+
+Voy a sacar las figuras de calidad pero para el model primero: 
+
+Calidad del modelo medida en training y en test:
+
+```{r}
+data.train$price_est <- predict(model, data.train)
+caret::postResample(pred = data.train$price_est, obs=data.train$price)
+```
+
+
+```{r}
+data.test$price_est <- predict(model, data.test)
+caret::postResample(pred = data.test$price_est, obs=data.test$price)
+```
+
+
+Ahora vamos a ver los residuos: 
+
+Hemos visto que hemos tenido que filtrar para precios menores que 250 porque por encima teníamos outliers lo puedo ver en el boxplot que incluso por arriba de 200 ya son outliers: 
+
+```{r}
+library(tidyverse)
+X<-data$price
+boxplot(X, ylim=c(9,1000))+ 
+  theme_bw()+ 
+  grid()
+```
+
+```{r}
+library(tidyverse)
+X<-data$cleaning_fee
+boxplot(X, ylim=c(9,600))+ 
+  theme_bw()+ 
+  grid()
+```
+
+
+
+Por tanto voy a ver los residuos, primero filtro los precios mayores a 200
+
+```{r}
+data |> filter(price>200)
+```
+
+Tenemos 336 filas con precios mayores a 200 euros que son outliers 
+
+
+Para ver los residuos: 
+
+```{r}
+data.test$residuos <- data.test$price - data.test$price_est
+ggplot(data.test, aes(x=price, y=residuos))+geom_point(color='blue')+
+  ggtitle("Residuos en dataset Testing")
+```
+
+```{r}
+ggplot(data.train, aes(x=price-price_est))+geom_histogram(color='red', fill='blue')
+```
+
+
+
+voy a ver un momento si con una función logarítmica suavizo outliers y me sale mejor: 
+
+```{r}
+
+ggplot(data, aes(x=price, y=cleaning_fee))+geom_point()+
+  scale_y_log10()+scale_x_log10()
+```
+
+
+Por tanto ahora voy a empezar mi modelo definitivo lo de arriba me a servido para entender y analizar la forma más optima de enfocarlo: 
+
+voy a cargar de nuevo el dataframe
+
+```{r}
+df_bnb<- read.csv('datos/data1.csv', stringsAsFactors = T)
+head(df_bnb)
+```
+
+
+Voy a generar dos nuevas columnas pasando el precio y el número de reviewa a base logarítmica: 
+
+```{r}
+library(tidyverse)
+df_bnb <- df_bnb |> mutate(price_log=log10(price+0.1), number_of_reviews_log=log10(number_of_reviews+0.1),zipcode_log=log10(zipcode+0.1), cleaning_fee_log=log10(cleaning_fee+0.1), security_deposit_log=log10(security_deposit+0.1))
+head(df_bnb)
+```
+
+
+
+```{r}
+library(GGally)
+ggpairs(df_bnb[,c("price_log", "cleaning_fee_log", "zipcode_log", "security_deposit", "availability_365", "number_of_reviews_log", "room_type", "bed_type")],
+lower = list(continuous = wrap("points", alpha = 0.3,size=0.3,color='blue'))
+) 
+```
+
+
+bed_type
+```{r}
+test_model <- lm(data=df_bnb, formula=price_log~cleaning_fee_log+number_of_reviews_log+ zipcode_log+ room_type+bed_type+neighbourhood_cleansed)
+summary(test_model)
+
+```
+
+
+```{r}
+final_model <- lm(data=df_bnb, formula=price_log~cleaning_fee_log+number_of_reviews_log+ zipcode_log+ room_type+bed_type)
+summary(final_model)
+
+```
+
+Vamos a dividir nuestros datos entre train y testing:
+
+```{r}
+set.seed(5)
+idx <- sample(1:nrow(df_bnb), nrow(df_bnb)*0.7)
+df_bnb.train <- df_bnb[idx, ]
+df_bnb.test <- df_bnb[-idx, ]
+```
+
+Vamos a analizar nuestro cojunto de test y train:
+
+```{r}
+print("Training:")
+summary(df_bnb.train)
+paste("Numero de filas training",nrow(df_bnb.train))
+print("Testing:")
+summary(df_bnb.test)
+paste("Numero de filas testing",nrow(df_bnb.test))
+```
+
+
+La calidad del modelo medida en Training:
+
+```{r}
+df_bnb.train$pred_log <- predict(final_model, df_bnb.train)
+caret::postResample(pred=df_bnb.train$pred_log, obs=df_bnb.train$price_log)
+```
+
+La calidad del modelo en testing (real):
+
+```{r}
+df_bnb.test$pred_log <- predict(final_model, df_bnb.test)
+caret::postResample(pred=df_bnb.test$pred_log, obs=df_bnb.test$price_log)
+```
+
+
+Vamos a ver los residuos: 
+
+```{r}
+df_bnb.test$residuos <- df_bnb.test$price_log - df_bnb.test$pred_log
+ggplot(df_bnb.test, aes(x=price_log, y=residuos))+geom_point(color='blue')+
+  ggtitle("Residuos en dataset Testing")
+```
+
+
+```{r}
+df_bnb |> filter(price>200, cleaning_fee>100)
+```
+
+
+
